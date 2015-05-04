@@ -153,6 +153,8 @@ define(function (require) {
                 params: {
                     entity: null,
                     id: null,
+                    page: null,
+                    search: null,
                     sortField: null,
                     sortDir: null
                 },
@@ -238,6 +240,12 @@ define(function (require) {
                 controller: 'FormController',
                 controllerAs: 'formController',
                 templateProvider: templateProvider('CreateView', createTemplate),
+                params: {
+                    page: null,
+                    search: null,
+                    sortField: null,
+                    sortDir: null
+                },
                 resolve: {
                     dataStore: dataStoreProvider(),
                     view: viewProvider('CreateView'),
@@ -283,6 +291,8 @@ define(function (require) {
                 params: {
                     entity: null,
                     id: null,
+                    page: null,
+                    search: null,
                     sortField: null,
                     sortDir: null
                 },
@@ -368,6 +378,12 @@ define(function (require) {
                 controller: 'DeleteController',
                 controllerAs: 'deleteController',
                 templateProvider: templateProvider('DeleteView', deleteTemplate),
+                params: {
+                    page: null,
+                    search: null,
+                    sortField: null,
+                    sortDir: null
+                },
                 resolve: {
                     view: viewProvider('DeleteView'),
                     params: ['$stateParams', function ($stateParams) {
@@ -389,6 +405,10 @@ define(function (require) {
                 params: {
                     entity: null,
                     ids: [],
+                    page: null,
+                    search: null,
+                    sortField: null,
+                    sortDir: null
                 },
                 resolve: {
                     view: viewProvider('BatchDeleteView'),
