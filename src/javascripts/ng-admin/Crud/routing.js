@@ -19,8 +19,9 @@ function templateProvider(viewName, defaultView) {
 
 function viewProvider(viewName) {
     return ['$stateParams', 'NgAdminConfiguration', function ($stateParams, Configuration) {
+        var view;
         try {
-            var view = Configuration().getViewByEntityAndType($stateParams.entity, viewName);
+            view = Configuration().getViewByEntityAndType($stateParams.entity, viewName);
         } catch (e) {
             var error404 = new Error('Unknown view or entity name');
             error404.status = 404; // trigger the 404 error
@@ -30,6 +31,12 @@ function viewProvider(viewName) {
             throw new Error('The ' + viewName + ' is disabled for this entity');
         }
         return view;
+    }];
+}
+
+function dataStoreProvider() {
+    return ['AdminDescription', function (AdminDescription) {
+        return AdminDescription.getDataStore();
     }];
 }
 
@@ -50,17 +57,83 @@ function routing($stateProvider) {
             controllerAs: 'listController',
             templateProvider: templateProvider('ListView', listTemplate),
             resolve: {
+                dataStore: dataStoreProvider(),
                 view: viewProvider('ListView'),
-                data: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
+                response: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
                     var page = $stateParams.page,
                         filters = $stateParams.search,
                         sortField = $stateParams.sortField,
                         sortDir = $stateParams.sortDir;
 
-                    return ReadQueries.getAll(view, page, true, filters, sortField, sortDir);
+                    return ReadQueries.getAll(view, page, filters, sortField, sortDir);
                 }],
-                referencedValues: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
-                    return ReadQueries.getReferencedValues(view.getFilterReferences());
+                totalItems: ['response', function (response) {
+                    return response.totalItems;
+                }],
+                referencedData: ['ReadQueries', 'view', 'response', function (ReadQueries, view, response) {
+                    return ReadQueries.getReferencedData(view.getReferences(), response.data);
+                }],
+                referencedEntries: ['dataStore', 'view', 'referencedData', function (dataStore, view, referencedData) {
+                    var references = view.getReferences();
+                    var referencedEntries;
+
+                    for (var name in referencedData) {
+                        referencedEntries = dataStore.mapEntries(
+                            references[name].targetEntity().name(),
+                            references[name].targetEntity().identifier(),
+                            [references[name].targetField()],
+                            referencedData[name]
+                        );
+
+                        dataStore.setEntries(
+                            references[name].targetEntity().uniqueId + '_values',
+                            referencedEntries
+                        );
+                    }
+
+                    return true;
+                }],
+                entries: ['dataStore', 'view', 'response', 'referencedEntries', function (dataStore, view, response, referencedEntries) {
+                    var entries = dataStore.mapEntries(
+                        view.entity.name(),
+                        view.identifier(),
+                        view.getFields(),
+                        response.data
+                    );
+
+                    // shortcut to diplay collection of entry with included referenced values
+                    dataStore.fillReferencesValuesFromCollection(entries, view.getReferences(), true);
+
+                    // set entries here ???
+                    dataStore.setEntries(
+                        view.getEntity().uniqueId,
+                        entries
+                    );
+
+                    return true;
+                }],
+                filterData: ['ReadQueries', 'view', function (ReadQueries, view) {
+                    return ReadQueries.getReferencedData(view.getFilterReferences());
+                }],
+                filterEntries: ['dataStore', 'view', 'filterData', function (dataStore, view, filterData) {
+                    var filters = view.getFilterReferences();
+                    var filterEntries;
+
+                    for (var name in filterData) {
+                        filterEntries = dataStore.mapEntries(
+                            filters[name].targetEntity().name(),
+                            filters[name].targetEntity().identifier(),
+                            [filters[name].targetField()],
+                            filterData[name]
+                        );
+
+                        dataStore.setEntries(
+                            filters[name].targetEntity().uniqueId + '_choices',
+                            filterEntries
+                        );
+                    }
+
+                    return true;
                 }]
             }
         });
@@ -79,21 +152,76 @@ function routing($stateProvider) {
                 sortDir: null
             },
             resolve: {
+                dataStore: dataStoreProvider(),
                 view: viewProvider('ShowView'),
                 rawEntry: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
-                    return RetrieveQueries.getOne(view.getEntity(), view.type, $stateParams.id, view.identifier(), view.getUrl());
+                    return ReadQueries.getOne(view.getEntity(), view.type, $stateParams.id, view.identifier(), view.getUrl());
                 }],
-                referencedValues: ['ReadQueries', 'view', 'rawEntry', function (ReadQueries, view, rawEntry) {
-                    return ReadQueries.getReferencedValues(view.getReferences(), [rawEntry.values]);
+                entry: ['dataStore', 'view', 'rawEntry', function(dataStore, view, rawEntry) {
+                    return dataStore.mapEntry(
+                        view.entity.name(),
+                        view.identifier(),
+                        view.getFields(),
+                        rawEntry
+                    );
                 }],
-                referencedListValues: ['$stateParams', 'ReadQueries', 'view', 'rawEntry', function ($stateParams, ReadQueries, view, rawEntry) {
-                    var sortField = $stateParams.sortField,
-                        sortDir = $stateParams.sortDir;
+                referencedData: ['ReadQueries', 'view', 'entry', function (ReadQueries, view, entry) {
+                    return ReadQueries.getReferencedData(view.getReferences(), [entry.values]);
+                }],
+                referencedEntries: ['dataStore', 'view', 'referencedData', function (dataStore, view, referencedData) {
+                    var references = view.getReferences();
+                    var referencedEntries;
 
-                    return ReadQueries.getReferencedListValues(view, sortField, sortDir, rawEntry.identifierValue);
+                    for (var name in referencedData) {
+                        referencedEntries = dataStore.mapEntries(
+                            references[name].targetEntity().name(),
+                            references[name].targetEntity().identifier(),
+                            [references[name].targetField()],
+                            referencedData[name]
+                        );
+
+                        dataStore.setEntries(
+                            references[name].targetEntity().uniqueId + '_values',
+                            referencedEntries
+                        );
+                    }
+
+                    return true;
                 }],
-                entry: ['ReadQueries', 'rawEntry', 'referencedValues', function(ReadQueries, rawEntry, referencedValues) {
-                    return ReadQueries.fillReferencesValuesFromEntry(rawEntry, referencedValues, true);
+                referencedListData: ['$stateParams', 'ReadQueries', 'view', 'entry', function ($stateParams, ReadQueries, view, entry) {
+                    var referencedLists = view.getReferencedLists();
+                    var sortField = $stateParams.sortField;
+                    var sortDir = $stateParams.sortDir;
+
+                    return ReadQueries.getReferencedListData(referencedLists, sortField, sortDir, entry.identifierValue);
+                }],
+                referencedListEntries: ['dataStore', 'view', 'referencedListData', function (dataStore, view, referencedListData) {
+                    var referencedLists = view.getReferencedLists();
+                    var referencedList;
+                    var referencedListEntries;
+
+                    for (var i in referencedLists) {
+                        referencedList = referencedLists[i];
+                        referencedListEntries = referencedListData[i];
+
+                        referencedListEntries = dataStore.mapEntries(
+                            referencedList.targetEntity().name(),
+                            referencedList.targetEntity().identifier(),
+                            referencedList.targetFields(),
+                            referencedListEntries
+                        );
+
+                        dataStore.setEntries(
+                            referencedList.targetEntity().uniqueId + '_list',
+                            referencedListEntries
+                        );
+                    }
+                }],
+                entryWithReferences: ['dataStore', 'view', 'entry', 'referencedEntries', function(dataStore, view, entry, referencedEntries) {
+                    dataStore.fillReferencesValuesFromEntry(entry, view.getReferences(), true);
+
+                    dataStore.addEntry(view.getEntity().uniqueId, entry);
+                    return true;
                 }]
             }
         });
@@ -106,17 +234,36 @@ function routing($stateProvider) {
             controllerAs: 'formController',
             templateProvider: templateProvider('CreateView', createTemplate),
             resolve: {
+                dataStore: dataStoreProvider(),
                 view: viewProvider('CreateView'),
-                entry: ['view', function (view) {
-                    var entry = view
-                        .mapEntry({});
-
-                    view.processFieldsDefaultValue(entry);
+                entry: ['dataStore', 'view', function (dataStore, view) {
+                    var entry = dataStore.createEntry(view.entity.name(), view.identifier(), view.getFields());
+                    dataStore.addEntry(view.getEntity().uniqueId, entry);
 
                     return entry;
                 }],
-                referencedValues: ['ReadQueries', 'view', function (ReadQueries, view) {
-                    return ReadQueries.getReferencedValues(view.getReferences());
+                referencedData: ['ReadQueries', 'view', function (ReadQueries, view) {
+                    return ReadQueries.getReferencedData(view.getReferences());
+                }],
+                referencedEntries: ['dataStore', 'view', 'referencedData', function (dataStore, view, referencedData) {
+                    var references = view.getReferences();
+                    var referencedEntries;
+
+                    for (var name in referencedData) {
+                        referencedEntries = dataStore.mapEntries(
+                            references[name].targetEntity().name(),
+                            references[name].targetEntity().identifier(),
+                            [references[name].targetField()],
+                            referencedData[name]
+                        );
+
+                        dataStore.setEntries(
+                            references[name].targetEntity().uniqueId + '_choices',
+                            referencedEntries
+                        );
+                    }
+
+                    return true;
                 }]
             }
         });
@@ -135,21 +282,76 @@ function routing($stateProvider) {
                 sortDir: null
             },
             resolve: {
+                dataStore: dataStoreProvider(),
                 view: viewProvider('EditView'),
                 rawEntry: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
+                    return ReadQueries.getOne(view.getEntity(), view.type, $stateParams.id, view.identifier(), view.getUrl());
+                }],
+                entry: ['dataStore', 'view', 'rawEntry', function(dataStore, view, rawEntry) {
+                    return dataStore.mapEntry(
+                        view.entity.name(),
+                        view.identifier(),
+                        view.getFields(),
+                        rawEntry
+                    );
+                }],
+                referencedData: ['ReadQueries', 'view', function (ReadQueries, view) {
+                    return ReadQueries.getReferencedData(view.getReferences());
+                }],
+                referencedEntries: ['dataStore', 'view', 'referencedData', function (dataStore, view, referencedData) {
+                    var references = view.getReferences();
 
-                }],
-                referencedValues: ['ReadQueries', 'view', 'rawEntry', function (ReadQueries, view, rawEntry) {
-                    return ReadQueries.getReferencedValues(view.getReferences(), null);
-                }],
-                referencedListValues: ['$stateParams', 'ReadQueries', 'view', 'rawEntry', function ($stateParams, ReadQueries, view, rawEntry) {
-                    var sortField = $stateParams.sortField,
-                        sortDir = $stateParams.sortDir;
+                    var referencedEntries;
+                    for (var name in referencedData) {
+                        referencedEntries = dataStore.mapEntries(
+                            references[name].targetEntity().name(),
+                            references[name].targetEntity().identifier(),
+                            [references[name].targetField()],
+                            referencedData[name]
+                        );
 
-                    return ReadQueries.getReferencedListValues(view, sortField, sortDir, rawEntry.identifierValue);
+                        dataStore.setEntries(
+                            references[name].targetEntity().uniqueId + '_choices',
+                            referencedEntries
+                        );
+                    }
+
+                    return true;
                 }],
-                entry: ['ReadQueries', 'rawEntry', 'referencedValues', function(ReadQueries, rawEntry, referencedValues) {
-                    return ReadQueries.fillReferencesValuesFromEntry(rawEntry, referencedValues, true);
+                referencedListData: ['$stateParams', 'ReadQueries', 'view', 'entry', function ($stateParams, ReadQueries, view, entry) {
+                    var referencedLists = view.getReferencedLists();
+                    var sortField = $stateParams.sortField;
+                    var sortDir = $stateParams.sortDir;
+
+                    return ReadQueries.getReferencedListData(referencedLists, sortField, sortDir, entry.identifierValue);
+                }],
+                referencedListEntries: ['dataStore', 'view', 'referencedListData', function (dataStore, view, referencedListData) {
+                    var referencedLists = view.getReferencedLists();
+                    var referencedList;
+                    var referencedListEntries;
+
+                    for (var i in referencedLists) {
+                        referencedList = referencedLists[i];
+                        referencedListEntries = referencedListData[i];
+
+                        referencedListEntries = dataStore.mapEntries(
+                            referencedList.targetEntity().name(),
+                            referencedList.targetEntity().identifier(),
+                            referencedList.targetFields(),
+                            referencedListEntries
+                        );
+
+                        dataStore.setEntries(
+                            referencedList.targetEntity().uniqueId + '_list',
+                            referencedListEntries
+                        );
+                    }
+                }],
+                entryWithReferences: ['dataStore', 'view', 'entry', 'referencedEntries', function(dataStore, view, entry, referencedEntries) {
+                    dataStore.fillReferencesValuesFromEntry(entry, view.getReferences(), true);
+
+                    dataStore.addEntry(view.getEntity().uniqueId, entry);
+                    return true;
                 }]
             }
         });
@@ -167,7 +369,7 @@ function routing($stateProvider) {
                     return $stateParams;
                 }],
                 entry: ['$stateParams', 'ReadQueries', 'view', function ($stateParams, ReadQueries, view) {
-
+                    return ReadQueries.getOne(view.getEntity(), view.type, $stateParams.id, view.identifier(), view.getUrl());
                 }]
             }
         });
